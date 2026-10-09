@@ -12,24 +12,36 @@ class Params:
     Cd: float = 0.3         # drag coefficient
     A: float = 0.05         # cross-sectional area, m^2
     m: float = 4.0          # mass, kg
-    wind: float = 0.0       # horizontal wind, m/s (positive = tailwind)
+    wind_speed: float = 0.0      # wind speed m/s (positive = tailwind)
     g: float = 9.81         #gravity, m/s^2
+    wind_angle_deg: float = 0.0   #wind angle
+    y0: float = 0.0         #release height
+
+#-------------MORE TO DO: MONTE CARLO ANALYSIS --------------
+# def random_number_generator():
+#     np.random.seed(0)
+#     params_init = np.random.randn()
+    
+
 
 
 #------------ ODE and Function------------------
+
 def simulate(p: Params):
     theta = np.radians(p.angle_deg)
-    initial_cond = [0.0, 0.0, p.v0 * np.cos(theta), p.v0 * np.sin(theta)]
+    wind_theta = np.radians(p.wind_angle_deg)
+    initial_cond = [0.0, p.y0, p.v0 * np.cos(theta), p.v0 * np.sin(theta)]
     def flight_dynamics(t, cond):
         x, y, vx, vy = cond
         rho = 1.225 * np.exp(-y/8500)
-        vx_rel = vx - p.wind
-        v_rel = np.sqrt(vx_rel**2 + vy**2)
+        vx_rel = vx - p.wind_speed * np.cos(wind_theta)
+        vy_rel = vy - p.wind_speed * np.sin(wind_theta)
+        v_rel = np.sqrt(vx_rel**2 + vy_rel**2)
         F_drag = 0.5 * rho * v_rel**2 * p.Cd * p.A
 
         if v_rel > 0:
             ax = -(F_drag/p.m) * (vx_rel/v_rel)
-            ay = -p.g - (F_drag/p.m) * (vy/v_rel) 
+            ay = -p.g - (F_drag/p.m) * (vy_rel/v_rel) 
         else:
             ax = 0
             ay = -p.g
@@ -45,14 +57,14 @@ def simulate(p: Params):
     if sol.status !=  1:
         raise RuntimeError("Projectile never landed within the time frame")
     return sol
-
 def solve_summarize(sol):
     return{"range": sol.y[0, -1], "max_height": sol.y[1].max(), "time": sol.t[-1]}
 
 
 # ------------ Vacuum Comparison ----------------
-def vacuum_range(p: Params):
+def vacuum_range(p: Params): #Assume y0 = 0.0 
     return p.v0**2 * np.sin(2 * np.radians(p.angle_deg)) / p.g
+
 
 def check_against_vacuum():
     p = Params(Cd=0.0)
@@ -63,6 +75,32 @@ def check_against_vacuum():
         raise RuntimeError(
             f"Vacuum check FAILED: numeric {numeric:.6f} m vs analytic "
             f"{analytic:.6f} m (relative error {rel_err:.2e})")
+#------------ Wind Functions -------------------
+def metric_at_wind(wind_speed, wind_angle_deg, key):
+    p = Params(wind_speed = wind_speed, wind_angle_deg = wind_angle_deg)
+    return solve_summarize(simulate(p))[key]
+def check_tailwindx_directions():
+    still = metric_at_wind(0.0, 0.0, "range")
+    tail = metric_at_wind(5.0, 0.0, "range")
+    head = metric_at_wind(-5.0, 0.0, "range")
+    if not tail > still  > head:
+        raise RuntimeError(
+            f"Tailwind check FAILED in X-Direction: tail = {tail:.2f} m vs still = {still:.2f} m vs head = {head:.2f}m")
+def check_tailwindy_directions():
+    still = metric_at_wind(0.0, 90.0, "max_height")
+    up =  metric_at_wind(5.0, 90.0, "max_height")
+    down =  metric_at_wind(-5.0, 90.0, "max_height")
+    if not up > still > down:
+        raise RuntimeError(
+            f"Tailwind check FAILED in Y-Direction: up = {up:.2f} m vs still = {still:.2f}m vs down = {down:.2f}m")
+#-------------- Ballistic Checker for Drag Force -----------------
+def ballistic_checker():
+    base = Params()
+    scaled = replace(base, A = base.A*2, m = base.m*2)
+    range1 = solve_summarize(simulate(base))["range"]
+    range2 = solve_summarize(simulate(scaled))["range"]
+    if not np.isclose(range1, range2, rtol = 1e-6):
+        raise RuntimeError("The scaling between mass and area is incorrect")
 
 #------------ Angle Optimization-----------------
 def range_at_cond(angle_deg, base: Params):
@@ -72,13 +110,19 @@ def angle_sweep(base: Params, angles):
     return np.array([range_at_cond(a, base) for a in angles])
 
 def find_optimal_angle(base: Params):
+    low, high = (10, 80)
+    margin = 0.5
     res = minimize_scalar(lambda a: -range_at_cond(a, base),
-                          bounds=(10, 80), method="bounded")
+                          bounds=(low, high), method="bounded")
+    if res.x < low + margin or res.x > high - margin:
+        raise ValueError(f"Best angle {res.x:.2f} deg is at the edge of ({low}, {high})")
     return res.x, -res.fun
-
 #----------- Plotting ------------------
 def plot(traj_angles=(20, 30, 45, 60, 75)):
     check_against_vacuum()
+    check_tailwindx_directions()
+    check_tailwindy_directions()
+    ballistic_checker()
 
     base = Params()
     angles = np.linspace(5, 85, 100)
@@ -103,6 +147,7 @@ def plot(traj_angles=(20, 30, 45, 60, 75)):
                     p.v0 * np.sin(th) * tv - 0.5 * p.g * tv**2,
                     "--", color= line.get_color(), alpha=0.5)
     ax1.set(xlabel="x (m)", ylabel="y (m)", title="Trajectories (solid: drag, dashed: vacuum)")
+    ax1.set_aspect("equal")
     ax1.legend(title="Launch angle")
     ax1.grid(alpha=0.3)
         
@@ -124,4 +169,3 @@ def plot(traj_angles=(20, 30, 45, 60, 75)):
 if __name__ == "__main__":
     plot([10, 25, 50, 70])  
 
-    
