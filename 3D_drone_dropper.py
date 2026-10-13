@@ -76,7 +76,7 @@ def vacuum_landing(p: Params):
 def check_against_vacuum():
     p = replace(Params(Cd=0.0), elevation_deg=20.0, azimuth_deg=30.0)
     summary = solve_summarize(simulate(p))
-    num_x, num_z = summary["downrange"], summary["crossrange"]
+    num_x, num_z = summary["range"], summary["crossrange"]
     ana_x, ana_z = vacuum_landing(p)
 
     ok_x = np.isclose(num_x, ana_x, rtol=1e-4)
@@ -85,25 +85,27 @@ def check_against_vacuum():
         raise RuntimeError(
             f"Vacuum check FAILED: x numeric {num_x:.6f} vs analytic {ana_x:.6f} m, "
             f"z numeric {num_z:.6f} vs analytic {ana_z:.6f} m")
-        
+def check_planar_symmetry():
+    p = replace(Params(), azimuth_deg = 0.0, elevation_deg = 35.0, wind_x = 10.0, wind_y = 10.0, wind_z = 0.0)
+    sol = simulate(p)
+    z_history = sol.y[2]
+    worst_drift = np.max(np.abs(z_history))
+    if  worst_drift > 1e-12:
+        raise RuntimeError(f"Drift check FAILED:absolute largest drift was {worst_drift:.3e} m")
 #------------ Wind Functions -------------------
-def metric_at_wind(wind_speed, wind_angle_deg, key):
-    p = Params(wind_speed = wind_speed, wind_angle_deg = wind_angle_deg)
-    return solve_summarize(simulate(p))[key]
-def check_tailwindx_directions():
-    still = metric_at_wind(0.0, 0.0, "range")
-    tail = metric_at_wind(5.0, 0.0, "range")
-    head = metric_at_wind(-5.0, 0.0, "range")
-    if not tail > still  > head:
-        raise RuntimeError(
-            f"Tailwind check FAILED in X-Direction: tail = {tail:.2f} m vs still = {still:.2f} m vs head = {head:.2f}m")
-def check_tailwindy_directions():
-    still = metric_at_wind(0.0, 90.0, "max_height")
-    up =  metric_at_wind(5.0, 90.0, "max_height")
-    down =  metric_at_wind(-5.0, 90.0, "max_height")
-    if not up > still > down:
-        raise RuntimeError(
-            f"Tailwind check FAILED in Y-Direction: up = {up:.2f} m vs still = {still:.2f}m vs down = {down:.2f}m")
+def check_crosswind_sign():
+    base = replace(Params(), elevation_deg = 0, azimuth_deg = 0, wind_x = 0, wind_y = 0)
+    cross_range_pos = solve_summarize(simulate(replace(base, wind_z = 5.0)))["crossrange"]
+    cross_range_neg = solve_summarize(simulate(replace(base, wind_z = -5.0)))["crossrange"]
+    total = cross_range_pos + cross_range_neg
+    if cross_range_pos <= 0:
+        raise ValueError(f"+5 m/s crosswind gave crossrange {cross_range_pos:.3e} m, expected > 0")
+    elif cross_range_neg >= 0:
+        raise ValueError(f"-5 m/s crosswind gave crossrange {cross_range_pos:.3e} m, expected < 0")
+    elif not np.isclose(total, 0, atol = 1e-9):
+        raise ValueError(f"Mirror check FAILED: +5 gave {cross_range_pos:.6e} m, -5 gave {cross_range_neg:.6e} m, sum {total:.3e} m")
+    
+
 #-------------- Ballistic Checker for Drag Force -----------------
 def ballistic_checker():
     base = Params()
@@ -131,9 +133,10 @@ def find_optimal_angle(base: Params):
 #----------- Plotting ------------------
 def plot(traj_angles=(20, 30, 45, 60, 75)):
     check_against_vacuum()
-    check_tailwindx_directions()
-    check_tailwindy_directions()
     ballistic_checker()
+    check_planar_symmetry()
+    check_crosswind_sign()
+
 
     base = Params()
     angles = np.linspace(5, 85, 100)
@@ -178,5 +181,9 @@ def plot(traj_angles=(20, 30, 45, 60, 75)):
         
         
 if __name__ == "__main__":
-    plot([10, 25, 50, 70])  
-
+    check_against_vacuum()
+    print("vacuum check passed")
+    check_planar_symmetry()
+    print("planar symmetry check passed")
+    check_crosswind_sign()
+    print("crosswind sign check passed")
