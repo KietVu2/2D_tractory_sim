@@ -63,7 +63,8 @@ def simulate(p: Params):
         raise RuntimeError("Projectile never landed within the time frame")
     return sol
 def solve_summarize(sol):
-    return{"range": sol.y[0, -1], "max_height": sol.y[1].max(), "crossrange": sol.y[2,-1],"time": sol.t[-1]}
+    return{"range": sol.y[0, -1], "max_height": sol.y[1].max(), "crossrange": sol.y[2,-1],"time": sol.t[-1], 
+           "impact_speed": np.linalg.norm(sol.y[3:6, -1])}
 
 
 # ------------ Vacuum Comparison ----------------
