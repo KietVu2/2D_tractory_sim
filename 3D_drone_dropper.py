@@ -102,7 +102,7 @@ def check_crosswind_sign():
     if cross_range_pos <= 0:
         raise ValueError(f"+5 m/s crosswind gave crossrange {cross_range_pos:.3e} m, expected > 0")
     elif cross_range_neg >= 0:
-        raise ValueError(f"-5 m/s crosswind gave crossrange {cross_range_pos:.3e} m, expected < 0")
+        raise ValueError(f"-5 m/s crosswind gave crossrange {cross_range_neg:.3e} m, expected < 0")
     elif not np.isclose(total, 0, atol = 1e-9):
         raise ValueError(f"Mirror check FAILED: +5 gave {cross_range_pos:.6e} m, -5 gave {cross_range_neg:.6e} m, sum {total:.3e} m")
     
@@ -118,7 +118,7 @@ def ballistic_checker():
 
 #------------ Angle Optimization-----------------
 def range_at_cond(angle_deg, base: Params):
-    return solve_summarize(simulate(replace(base, angle_deg = angle_deg)))["range"]
+    return solve_summarize(simulate(replace(base, elevation_deg=angle_deg)))["range"]
 
 def angle_sweep(base: Params, angles):
     return np.array([range_at_cond(a, base) for a in angles])
@@ -132,59 +132,46 @@ def find_optimal_angle(base: Params):
         raise ValueError(f"Best angle {res.x:.2f} deg is at the edge of ({low}, {high})")
     return res.x, -res.fun
 #----------- Plotting ------------------
-def plot(traj_angles=(20, 30, 45, 60, 75)):
+def plot_3d(base=None, traj_angles=(20, 30, 45, 60, 75), show_vacuum=True, n=100):    
     check_against_vacuum()
     ballistic_checker()
     check_planar_symmetry()
     check_crosswind_sign()
 
+    if base is None:
+        base = Params(azimuth_deg=20.0, wind_z=3.0)
 
-    base = Params()
-    angles = np.linspace(5, 85, 100)
-    ranges_drag = angle_sweep(base, angles)
-    ranges_vac = base.v0**2 * np.sin(2 * np.radians(angles)) / base.g
-    best_angle, best_range = find_optimal_angle(base)
-    print(f"Optimal angle with drag: {best_angle:.1f} deg, range {best_range:.1f} m")
-    print(f"Vacuum optimum: 45.0 deg, range {vacuum_range(base):.1f} m")
+    fig = plt.figure(figsize=(9, 7))
+    ax = fig.add_subplot(projection="3d")
+    xs, ys, zs = [], [], []
 
-    fig, (ax1, ax2) = plt.subplots(2, 1, figsize = (8, 8))
-
-    #Top: for trajectories comparison b/w drag(solid) vs vacuum(dashed)
     for a in traj_angles:
-        p = replace(base, angle_deg = a )
+        p = replace(base, elevation_deg=a)
         sol = simulate(p)
-        t = np.linspace(0, sol.t[-1], 300)
-        x, y = sol.sol(t)[:2]
-        th = np.radians(a)
-        tv = np.linspace(0, 2 * p.v0 * np.sin(th) / p.g, 300)
-        line, = ax1.plot(x, y, label=f"{a}°")
-        ax1.plot(p.v0 * np.cos(th) * tv,
-                    p.v0 * np.sin(th) * tv - 0.5 * p.g * tv**2,
-                    "--", color= line.get_color(), alpha=0.5)
-    ax1.set(xlabel="x (m)", ylabel="y (m)", title="Trajectories (solid: drag, dashed: vacuum)")
-    ax1.set_aspect("equal")
-    ax1.legend(title="Launch angle")
-    ax1.grid(alpha=0.3)
-        
-    #Bottom: range vs angle
-    ax2.plot(angles, ranges_vac, "--", label="Vacuum")
-    ax2.plot(angles, ranges_drag, label="With drag")
-    ax2.axvline(best_angle, color="gray", ls=":")
-    ax2.annotate(f"optimum {best_angle:.1f}°", (best_angle, best_range),
-                         textcoords="offset points", xytext=(10, -5))
-    ax2.set(xlabel="Launch angle (deg)", ylabel="Range (m)", title="Range vs. launch angle")
-    ax2.legend()
-    ax2.grid(alpha=0.3)
-        
+        t = np.linspace(0, sol.t[-1], n)
+        x, y, z = sol.sol(t)[:3]
+
+        line, = ax.plot(x, z, y, label=f"{a}°")
+        ax.scatter(x[-1], z[-1], 0, color=line.get_color(), s=20)  # landing point
+
+        vx0, vy0, vz0 = initial_velocity(p)
+        t_vac = (vy0 + np.sqrt(vy0**2 + 2 * p.g * p.y0)) / p.g
+        tv = np.linspace(0, t_vac, n)
+        xv, zv = vx0 * tv, vz0 * tv
+        yv = p.y0 + vy0 * tv - 0.5 * p.g * tv**2
+        ax.plot(xv, zv, yv, "--", color=line.get_color(), alpha=0.5)
+
+        xs += [x, xv]; ys += [y, yv]; zs += [z, zv]
+
+    spans = [max(np.ptp(np.concatenate(v)), 1.0) for v in (xs, zs, ys)]
+    ax.set_box_aspect(spans)
+
+    ax.set(xlabel="x downrange (m)", ylabel="z crossrange (m)", zlabel="y height (m)",
+           title="3D trajectories (solid: drag + wind, dashed: vacuum)")
+    ax.legend(title="Elevation")
     fig.tight_layout()
-    fig.savefig("projectile_sweep.png", dpi=150)
+    fig.savefig("projectile_3d.png", dpi=150)
     plt.show()
         
-        
 if __name__ == "__main__":
-    check_against_vacuum()
-    print("vacuum check passed")
-    check_planar_symmetry()
-    print("planar symmetry check passed")
-    check_crosswind_sign()
-    print("crosswind sign check passed")
+        plot_3d()
