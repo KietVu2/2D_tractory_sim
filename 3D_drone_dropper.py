@@ -3,7 +3,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 from scipy.integrate import solve_ivp
 from scipy.optimize import minimize_scalar
-
+import matplotlib
+matplotlib.use("QtAgg")
 # ---------- Launch Conditions --------------- 
 @dataclass(frozen = True)
 class Params:
@@ -154,14 +155,15 @@ def plot_3d(base=None, traj_angles=(20, 30, 45, 60, 75), show_vacuum=True, n=100
         line, = ax.plot(x, z, y, label=f"{a}°")
         ax.scatter(x[-1], z[-1], 0, color=line.get_color(), s=20)  # landing point
 
+    if show_vacuum:
         vx0, vy0, vz0 = initial_velocity(p)
         t_vac = (vy0 + np.sqrt(vy0**2 + 2 * p.g * p.y0)) / p.g
         tv = np.linspace(0, t_vac, n)
         xv, zv = vx0 * tv, vz0 * tv
         yv = p.y0 + vy0 * tv - 0.5 * p.g * tv**2
         ax.plot(xv, zv, yv, "--", color=line.get_color(), alpha=0.5)
-
-        xs += [x, xv]; ys += [y, yv]; zs += [z, zv]
+        xs.append(xv); ys.append(yv); zs.append(zv)
+    xs.append(xv); ys.append(yv); zs.append(zv)
 
     spans = [max(np.ptp(np.concatenate(v)), 1.0) for v in (xs, zs, ys)]
     ax.set_box_aspect(spans)
